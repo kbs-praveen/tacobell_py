@@ -8,14 +8,13 @@ from scrapy import signals
 # useful for handling different item types with a single interface
 from itemadapter import is_item, ItemAdapter
 
-from scrapy import signals
-from scrapy.http import HtmlResponse
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from scrapy.http import HtmlResponse
 import os
 import time
-
 
 class SeleniumMiddleware:
     def __init__(self):
@@ -25,16 +24,19 @@ class SeleniumMiddleware:
 
         service = Service(executable_path=path)
         chrome_options = Options()
-        # chrome_options.add_argument('--headless')  # Uncomment for headless mode
         chrome_options.add_argument('--disable-gpu')
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
 
     def process_request(self, request, spider):
-        if "tacobell" in request.url:  # Adjust condition to match Taco Bell
+        # Adjusted to apply to all product detail URLs
+        if "tacobell.com/food" in request.url:
             self.driver.get(request.url)
             self._scroll_to_load_content()
+            self._wait_for_images()
             body = self.driver.page_source
-            return HtmlResponse(url=request.url, body=body, encoding='utf-8', request=request)
+            response = HtmlResponse(url=request.url, body=body, encoding='utf-8', request=request)
+            response.meta['driver'] = self.driver  # Attach driver to the response meta
+            return response
 
     def _scroll_to_load_content(self):
         last_height = self.driver.execute_script("return document.body.scrollHeight")
@@ -46,8 +48,18 @@ class SeleniumMiddleware:
                 break
             last_height = new_height
 
+    def _wait_for_images(self):
+        images = self.driver.find_elements(By.TAG_NAME, 'img')
+        for img in images:
+            if not img.get_attribute('complete'):
+                self.driver.execute_script("arguments[0].scrollIntoView();", img)
+                time.sleep(1)  # Adjust wait time if needed
+
     def spider_closed(self, spider):
         self.driver.quit()
+
+
+
 
 class TacobellpySpiderMiddleware:
     # Not all methods need to be defined. If a method is not defined,
