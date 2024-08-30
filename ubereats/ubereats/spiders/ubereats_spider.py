@@ -174,6 +174,7 @@ class UberEatsSpider(scrapy.Spider):
         except Exception as e:
             self.logger.error(f"Error extracting image URL: {e}")
 
+        # Extract "pick many" options
         try:
             detail_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[data-testid="customization-pick-many"]')
 
@@ -202,7 +203,38 @@ class UberEatsSpider(scrapy.Spider):
                     {'name': category_name.strip() if category_name else None, 'ingredients': option_details})
 
         except Exception as e:
-            self.logger.error(f"Error extracting details: {e}")
+            self.logger.error(f"Error extracting details (pick many): {e}")
+
+        # Extract "pick one" options
+        try:
+            pick_one_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[data-testid="customization-pick-one"]')
+
+            for element in pick_one_elements:
+                category_name = element.find_element(By.CSS_SELECTOR, 'div.al.aq.b9.f3').text
+                options = element.find_elements(By.CSS_SELECTOR, 'label')
+                option_details = []
+
+                for option in options:
+                    try:
+                        name = option.find_element(By.CSS_SELECTOR, 'div.be.bf.bg.bh.g3.or').text
+                    except Exception as e:
+                        self.logger.error(f"Error extracting option name: {e}")
+                        name = None
+
+                    try:
+                        price = option.find_element(By.CSS_SELECTOR, 'div.be.bf.g1.dj.g3.bn').text
+                    except Exception as e:
+                        self.logger.error(f"Error extracting option price: {e}")
+                        price = None
+
+                    option_details.append(
+                        {'name': name.strip() if name else None, 'price': price.strip() if price else None})
+
+                details.append(
+                    {'name': category_name.strip() if category_name else None, 'options': option_details})
+
+        except Exception as e:
+            self.logger.error(f"Error extracting details (pick one): {e}")
 
         return {'item_name': item_name, 'image_url': image_url,
                 'item_details': details} if details or item_name else None
