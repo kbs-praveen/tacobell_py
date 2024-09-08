@@ -145,23 +145,16 @@ class UberEatsSpider(scrapy.Spider):
             menu_items = []
 
             for item in items:
-                offers = []
                 offer_data = item.get('offers', {})
-                if offer_data:
-                    offer = {
-                        'type': offer_data.get('@type'),
-                        'price': offer_data.get('price'),
-                        'price_currency': offer_data.get('priceCurrency')
-                    }
-                    offers.append(offer)
+                price = offer_data.get('price')  # Extracting the price directly
 
                 menu_item = {
                     'type': item.get('@type'),
                     'name': item.get('name'),
                     'description': item.get('description'),
-                    'image_url': None,  # Placeholder for the image URL to be added later
-                    'offers': offers,
-                    'ingredientsGroups': None  # Placeholder for details to be added later
+                    'image_url': '',  # Placeholder for the image URL to be added later
+                    'price': price,  # Directly adding the price
+                    'ingredientsGroups': ''  # Placeholder for details to be added later
                 }
                 menu_items.append(menu_item)
 
@@ -188,18 +181,18 @@ class UberEatsSpider(scrapy.Spider):
 
     def extract_item_details(self):
         details = []
-        item_name = None
-        image_url = None
+        item_name = ''
+        image_url = ''
 
         try:
             item_name_element = self.driver.find_element(By.CSS_SELECTOR, 'h1.ft.fv.fu.fs.al.cg')
-            item_name = item_name_element.text.strip() if item_name_element else None
+            item_name = item_name_element.text.strip() if item_name_element else ''
         except Exception as e:
             self.logger.error(f"Error extracting item name: {e}")
 
         try:
             image_element = self.driver.find_element(By.CSS_SELECTOR, 'div.cj.ae.bl.kx img')
-            image_url = image_element.get_attribute('src') if image_element else None
+            image_url = image_element.get_attribute('src') if image_element else ''
         except Exception as e:
             self.logger.error(f"Error extracting image URL: {e}")
 
@@ -225,7 +218,7 @@ class UberEatsSpider(scrapy.Spider):
                         name = option.find_element(By.CSS_SELECTOR, 'div.be.bf.bg.bh.g3.os').text
                     except Exception as e:
                         self.logger.error(f"Error extracting option name: {e}")
-                        name = None
+                        name = ''
 
                     try:
                         price_text = option.find_element(By.CSS_SELECTOR, 'div.be.bf.g1.dj.g3.bn').text
@@ -253,11 +246,11 @@ class UberEatsSpider(scrapy.Spider):
                         price = 0.0  # Default to 0.0 if price calculation fails
 
                     option_details.append(
-                        {'name': name.strip() if name else None, 'possibleToAdd': 1, 'price': price,
+                        {'name': name.strip() if name else '', 'possibleToAdd': 1, 'price': price,
                          'leftHalfPrice': left_half_price, 'rightHalfPrice': right_half_price})
 
                 details.append(
-                    {'type': "general", 'name': category_name.strip() if category_name else None, 'requiresSelectionMin': 0, 'requiresSelectionMax': requires_selection_max if requires_selection_max else None, 'ingredients': option_details})
+                    {'type': "general", 'name': category_name.strip() if category_name else '', 'requiresSelectionMin': 0, 'requiresSelectionMax': requires_selection_max if requires_selection_max else '', 'ingredients': option_details})
 
         except Exception as e:
             self.logger.error(f"Error extracting details (pick many): {e}")
@@ -284,7 +277,7 @@ class UberEatsSpider(scrapy.Spider):
                         name = option.find_element(By.CSS_SELECTOR, 'div.be.bf.bg.bh.g3.os').text
                     except Exception as e:
                         self.logger.error(f"Error extracting option name: {e}")
-                        name = None
+                        name = ''
 
                     try:
                         price_text = option.find_element(By.CSS_SELECTOR, 'div.be.bf.g1.dj.g3.bn').text
@@ -312,17 +305,17 @@ class UberEatsSpider(scrapy.Spider):
                         price = 0.0  # Default to 0.0 if price calculation fails
 
                     option_details.append(
-                        {'name': name.strip() if name else None, 'possibleToAdd': 1, 'price': price,
+                        {'name': name.strip() if name else '', 'possibleToAdd': 1, 'price': price,
                          'leftHalfPrice': left_half_price, 'rightHalfPrice': right_half_price})
 
                 details.append(
-                    {'type': "general", 'name': category_name.strip() if category_name else None, 'requiresSelectionMin': 0, 'requiresSelectionMax': requires_selection_max.strip()  if requires_selection_max else None, 'ingredients': option_details})
+                    {'type': "general", 'name': category_name.strip() if category_name else '', 'requiresSelectionMin': 0, 'requiresSelectionMax': requires_selection_max  if requires_selection_max else '', 'ingredients': option_details})
 
         except Exception as e:
             self.logger.error(f"Error extracting details (pick one): {e}")
 
         return {'item_name': item_name, 'image_url': image_url,
-                'item_details': details} if details or item_name else None
+                'item_details': details} if details or item_name else ''
 
     def append_item_details_to_menu(self, menu, item_details):
         if not item_details:
