@@ -7,6 +7,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
+import re  # Import regular expressions module
 
 
 class UberEatsSpider(scrapy.Spider):
@@ -21,6 +22,8 @@ class UberEatsSpider(scrapy.Spider):
         # chrome_options.add_argument("--headless")  # Uncomment to run in headless mode
         chrome_options.add_argument("--disable-gpu")
         self.driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=chrome_options)
+        self.data = {}  # Initialize a list to store the data
+        self.section_names = set()  # Initialize a set to store unique section names
 
     def parse(self, response):
         self.driver.get(response.url)
@@ -31,6 +34,9 @@ class UberEatsSpider(scrapy.Spider):
             try:
                 data = json.loads(json_data)
                 menu_data = self.parse_menu(data.get('hasMenu', {}))  # Parse initial menu structure
+
+                # Track unique section names
+                self.section_names.update(section['title'] for section in menu_data)
 
                 # Now handle dynamic content for menu items
                 try:
@@ -59,34 +65,37 @@ class UberEatsSpider(scrapy.Spider):
                     # Yield the final restaurant data with complete menu details
                     restaurant = {
                         'data': {
+                            "menu_id": 18344,
+                            'titleURL': data.get('@id'),
+                            'title_id': '',
                             'Context': data.get('@context'),
-                            'Id': data.get('@id'),
-                            'Title': data.get('name'),
-                            'serves_cuisine': data.get('servesCuisine'),
-                            'restaurantAddress': {
-                                'Type': data.get('address', {}).get('@type'),
-                                'street': data.get('address', {}).get('streetAddress'),
-                                'city': data.get('address', {}).get('addressLocality'),
-                                'state': data.get('address', {}).get('addressRegion'),
-                                'postal_code': data.get('address', {}).get('postalCode'),
-                                'country': data.get('address', {}).get('addressCountry'),
-                            },
-                            'geo': {
-                                'type': data.get('geo', {}).get('@type'),
-                                'latitude': data.get('geo', {}).get('latitude'),
-                                'longitude': data.get('geo', {}).get('longitude')
-                            },
-                            'telephone': data.get('telephone'),
-                            'price_range': data.get('priceRange'),
-                            'rating': data.get('aggregateRating', {}).get('ratingValue'),
-                            'review_count': data.get('aggregateRating', {}).get('reviewCount'),
-                            'cuisine': data.get('servesCuisine', []),
+                            'title': data.get('name'),
                             'images': data.get('image', []),
-                            'opening_hours': self.parse_opening_hours(data.get('openingHoursSpecification', [])),
+                            'LogoURL': '',
+
+                            'restaurantAddress': {
+                                '@type': data.get('address', {}).get('@type'),
+                                'streetAddress': data.get('address', {}).get('streetAddress'),
+                                'addressLocality': data.get('address', {}).get('addressLocality'),
+                                'addressRegion': data.get('address', {}).get('addressRegion'),
+                                'postalCode': data.get('address', {}).get('postalCode'),
+                                'addressCountry': data.get('address', {}).get('addressCountry'),
+                            },
+                            'storeOpeningHours': self.parse_opening_hours(data.get('openingHoursSpecification', [])),
+                            'priceRange': data.get('priceRange'),
+                            'telephone': data.get('telephone'),
+                            'ratingValue': data.get('aggregateRating', {}).get('ratingValue'),
+                            'ratingCount': data.get('aggregateRating', {}).get('reviewCount'),
+                            'latitude': data.get('geo', {}).get('latitude'),
+                            'longitude': data.get('geo', {}).get('longitude'),
+                            'cuisine': data.get('servesCuisine', []),
+                            'menu_groups': list(self.section_names),  # Add unique section names to menu_groups
+
                             'categories': menu_data  # Final menu with appended details
                         }
                     }
                     yield restaurant
+                    self.data = restaurant  # Store the data in the list
 
                 except Exception as e:
                     self.logger.error(f"Error occurred while extracting dynamic content: {e}")
@@ -95,18 +104,38 @@ class UberEatsSpider(scrapy.Spider):
                 self.logger.error(f'Error decoding JSON: {e}')
 
     def parse_opening_hours(self, hours_data):
-        opening_hours = []
+        # Define the days of the week in the correct order
+        days_of_week = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+
+        # Create a dictionary to hold the opening hours for each day
+        hours_dict = {day: None for day in days_of_week}
+
+        def format_time(time_str):
+            """Helper function to format the time string as HH:MM."""
+            if not time_str:
+                return "00:00"
+            time_parts = time_str.split(':')
+            if len(time_parts) == 1:
+                return f"{time_parts[0]}:00"
+            elif len(time_parts) == 2:
+                return f"{time_parts[0].zfill(2)}:{time_parts[1].zfill(2)}"
+            return time_str
+
+        # Populate the dictionary with the opening hours from the input data
         for hours in hours_data:
             days = hours.get('dayOfWeek', [])
             if not isinstance(days, list):
                 days = [days]
+            opens = format_time(hours.get('opens', ''))
+            closes = format_time(hours.get('closes', ''))
             for day in days:
-                opening_hours.append({
-                    'day': day,
-                    'opens': hours.get('opens'),
-                    'closes': hours.get('closes')
-                })
-        return opening_hours
+                if day in hours_dict:
+                    hours_dict[day] = f"{opens}-{closes}"
+
+        # Convert the dictionary to a list of formatted strings
+        store_opening_hours = [f"{day} {hours_dict[day]}" for day in days_of_week if hours_dict[day] is not None]
+
+        return store_opening_hours
 
     def parse_menu(self, menu_data):
         menu = []
@@ -179,28 +208,56 @@ class UberEatsSpider(scrapy.Spider):
             detail_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[data-testid="customization-pick-many"]')
 
             for element in detail_elements:
-                category_name = element.find_element(By.CSS_SELECTOR, 'div.al.aq.b9.f3').text
+                category_name = element.find_element(By.CSS_SELECTOR, 'div.fs.hy.fu.hz.g4').text
+                text = element.find_element(By.CSS_SELECTOR, 'div.be.bf.g1.dj.g4').text
+
+                # Use regular expression to find the number in the text
+                match = re.search(r'(\d+)', text)
+
+                # Extract the number if found, otherwise default to 0
+                requires_selection_max = int(match.group(1)) if match else 0
+
                 options = element.find_elements(By.CSS_SELECTOR, 'label')
                 option_details = []
 
                 for option in options:
                     try:
-                        name = option.find_element(By.CSS_SELECTOR, 'div.be.bf.bg.bh.g3.or').text
+                        name = option.find_element(By.CSS_SELECTOR, 'div.be.bf.bg.bh.g3.os').text
                     except Exception as e:
                         self.logger.error(f"Error extracting option name: {e}")
                         name = None
 
                     try:
-                        price = option.find_element(By.CSS_SELECTOR, 'div.be.bf.g1.dj.g3.bn').text
+                        price_text = option.find_element(By.CSS_SELECTOR, 'div.be.bf.g1.dj.g3.bn').text
+                        price_cleaned = re.sub(r'[^\d.]+', '', price_text).strip()
+                        left_half_price = float(
+                            price_cleaned) if price_cleaned else 0.0  # Default to 0.0 if price is not found or is empty
                     except Exception as e:
                         self.logger.error(f"Error extracting option price: {e}")
-                        price = None
+                        left_half_price = 0.0  # Default to 0.0 if price is not found
+
+                    try:
+                        price_text = option.find_element(By.CSS_SELECTOR, 'div.be.bf.g1.dj.g3.bn').text
+                        price_cleaned = re.sub(r'[^\d.]+', '', price_text).strip()
+                        right_half_price = float(
+                            price_cleaned) if price_cleaned else 0.0  # Default to 0.0 if price is not found or is empty
+                    except Exception as e:
+                        self.logger.error(f"Error extracting option price: {e}")
+                        right_half_price = 0.0  # Default to 0.0 if price is not found
+
+                    try:
+                        # Calculate price by summing left_half_price and right_half_price
+                        price = left_half_price + right_half_price
+                    except Exception as e:
+                        self.logger.error(f"Error calculating total price: {e}")
+                        price = 0.0  # Default to 0.0 if price calculation fails
 
                     option_details.append(
-                        {'name': name.strip() if name else None, 'price': price.strip() if price else None})
+                        {'name': name.strip() if name else None, 'possibleToAdd': 1, 'price': price,
+                         'leftHalfPrice': left_half_price, 'rightHalfPrice': right_half_price})
 
                 details.append(
-                    {'name': category_name.strip() if category_name else None, 'ingredients': option_details})
+                    {'type': "general", 'name': category_name.strip() if category_name else None, 'requiresSelectionMin': 0, 'requiresSelectionMax': requires_selection_max if requires_selection_max else None, 'ingredients': option_details})
 
         except Exception as e:
             self.logger.error(f"Error extracting details (pick many): {e}")
@@ -210,28 +267,56 @@ class UberEatsSpider(scrapy.Spider):
             pick_one_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[data-testid="customization-pick-one"]')
 
             for element in pick_one_elements:
-                category_name = element.find_element(By.CSS_SELECTOR, 'div.al.aq.b9.f3').text
+                category_name = element.find_element(By.CSS_SELECTOR, 'div.fs.hy.fu.hz.g4').text
+                text = element.find_element(By.CSS_SELECTOR, 'div.be.bf.g1.dj.g4').text
+
+                # Use regular expression to find the number in the text
+                match = re.search(r'(\d+)', text)
+
+                # Extract the number if found, otherwise default to 0
+                requires_selection_max = int(match.group(1)) if match else 0
+
                 options = element.find_elements(By.CSS_SELECTOR, 'label')
                 option_details = []
 
                 for option in options:
                     try:
-                        name = option.find_element(By.CSS_SELECTOR, 'div.be.bf.bg.bh.g3.or').text
+                        name = option.find_element(By.CSS_SELECTOR, 'div.be.bf.bg.bh.g3.os').text
                     except Exception as e:
                         self.logger.error(f"Error extracting option name: {e}")
                         name = None
 
                     try:
-                        price = option.find_element(By.CSS_SELECTOR, 'div.be.bf.g1.dj.g3.bn').text
+                        price_text = option.find_element(By.CSS_SELECTOR, 'div.be.bf.g1.dj.g3.bn').text
+                        price_cleaned = re.sub(r'[^\d.]+', '', price_text).strip()
+                        left_half_price = float(
+                            price_cleaned) if price_cleaned else 0.0  # Default to 0.0 if price is not found or is empty
                     except Exception as e:
                         self.logger.error(f"Error extracting option price: {e}")
-                        price = None
+                        left_half_price = 0.0  # Default to 0.0 if price is not found
+
+                    try:
+                        price_text = option.find_element(By.CSS_SELECTOR, 'div.be.bf.g1.dj.g3.bn').text
+                        price_cleaned = re.sub(r'[^\d.]+', '', price_text).strip()
+                        right_half_price = float(
+                            price_cleaned) if price_cleaned else 0.0  # Default to 0.0 if price is not found or is empty
+                    except Exception as e:
+                        self.logger.error(f"Error extracting option price: {e}")
+                        right_half_price = 0.0  # Default to 0.0 if price is not found
+
+                    try:
+                        # Calculate price by summing left_half_price and right_half_price
+                        price = left_half_price + right_half_price
+                    except Exception as e:
+                        self.logger.error(f"Error calculating total price: {e}")
+                        price = 0.0  # Default to 0.0 if price calculation fails
 
                     option_details.append(
-                        {'name': name.strip() if name else None, 'price': price.strip() if price else None})
+                        {'name': name.strip() if name else None, 'possibleToAdd': 1, 'price': price,
+                         'leftHalfPrice': left_half_price, 'rightHalfPrice': right_half_price})
 
                 details.append(
-                    {'name': category_name.strip() if category_name else None, 'options': option_details})
+                    {'type': "general", 'name': category_name.strip() if category_name else None, 'requiresSelectionMin': 0, 'requiresSelectionMax': requires_selection_max.strip()  if requires_selection_max else None, 'ingredients': option_details})
 
         except Exception as e:
             self.logger.error(f"Error extracting details (pick one): {e}")
@@ -260,3 +345,6 @@ class UberEatsSpider(scrapy.Spider):
 
     def closed(self, reason):
         self.driver.quit()
+        # Save the data to a JSON file
+        with open('ubereats_data.json', 'w') as f:
+            json.dump(self.data, f, indent=4)

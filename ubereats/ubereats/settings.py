@@ -98,3 +98,9 @@ AUTOTHROTTLE_MAX_DELAY = 120  # Increase maximum delay for throttling
 REQUEST_FINGERPRINTER_IMPLEMENTATION = "2.7"
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_EXPORT_ENCODING = "utf-8"
+FEEDS = {
+    'final.json': {
+        'format': 'json',
+        'overwrite': True,  # Overwrite the file if it already exists
+    },
+}
